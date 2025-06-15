@@ -1,0 +1,8 @@
+streamlit
+pymupdf
+langchain
+faiss-cpu
+sentence-transformers
+transformers
+requests
+googletrans==4.0.0-rc1
