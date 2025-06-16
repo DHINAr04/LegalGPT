@@ -5,13 +5,13 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
 import requests
-from googletrans import Translator
 import os
+from googletrans import Translator
 
-# 🔐 Replace with your actual Hugging Face API token
+# 🔐 Secure: load Hugging Face API key from environment
 HF_API_KEY = os.getenv("HF_API_KEY")
 
-# 📄 Extract text from uploaded PDF
+# 📄 Extract text from PDF
 def extract_text_from_pdf(uploaded_file):
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     text = ""
@@ -42,22 +42,23 @@ def search_index(query, index, chunks, model):
     results = [chunks[i] for i in I[0]]
     return "\n".join(results)
 
-# 💬 Ask LLM using a supported model
+# 💬 Ask LLM using Hugging Face
 def ask_llm(context, question):
     prompt = f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    response = requests.post(
-        "https://api-inference.huggingface.co/models/tiiuae/falcon-rw-1b",
-        headers=headers,
-        json={"inputs": prompt}
-    )
+    url = "https://api-inference.huggingface.co/models/tiiuae/falcon-rw-1b"
 
     try:
-        return response.json()[0]['generated_text'].split("Answer:")[-1].strip()
+        response = requests.post(url, headers=headers, json={"inputs": prompt})
+        if response.status_code != 200:
+            return f"❌ LLM API error ({response.status_code}): {response.text}"
+        data = response.json()
+        generated = data[0].get("generated_text", "")
+        return generated.split("Answer:")[-1].strip()
     except Exception as e:
-        return f"❌ LLM error: {str(e)}"
+        return f"❌ LLM exception: {str(e)}"
 
-# 📋 Extract and summarize clauses (uses same model)
+# 📋 Extract and summarize clauses
 def extract_clauses_with_summary(text):
     prompt = f"""
 You are a legal assistant. Extract and summarize key clauses from the contract below.
@@ -81,7 +82,7 @@ Text:
     except Exception as e:
         return f"❌ Clause summary failed: {str(e)}"
 
-# 🌐 Translate answer
+# 🌐 Translate text
 def translate_text(text, dest_lang="hi"):
     try:
         translator = Translator()
@@ -121,12 +122,11 @@ Output:
 st.set_page_config(page_title="LegalGPT", layout="wide")
 st.title("📄 LegalGPT – AI Legal Document Assistant")
 
-# Load sentence transformer
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 tab1, tab2 = st.tabs(["📑 Single Document", "🆚 Compare Documents"])
 
-# 📑 Tab 1 – Single Document Analysis
+# Tab 1 – Single PDF
 with tab1:
     uploaded_file = st.file_uploader("Upload a legal PDF", type="pdf")
     if uploaded_file:
@@ -155,7 +155,7 @@ with tab1:
             st.subheader("📌 Key Clauses & Summaries")
             st.write(clause_summary)
 
-# 🆚 Tab 2 – Compare Two PDFs
+# Tab 2 – Compare two PDFs
 with tab2:
     pdf1 = st.file_uploader("Upload First PDF", type="pdf", key="pdf1")
     pdf2 = st.file_uploader("Upload Second PDF", type="pdf", key="pdf2")
