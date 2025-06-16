@@ -46,7 +46,7 @@ def search_index(query, index, chunks, model):
 def ask_llm(context, question):
     prompt = f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    url = "https://api-inference.huggingface.co/models/tiiuae/falcon-rw-1b"
+    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
 
     try:
         response = requests.post(url, headers=headers, json={"inputs": prompt})
@@ -54,9 +54,10 @@ def ask_llm(context, question):
             return f"❌ LLM API error ({response.status_code}): {response.text}"
         data = response.json()
         generated = data[0].get("generated_text", "")
-        return generated.split("Answer:")[-1].strip()
+        return generated.strip()
     except Exception as e:
         return f"❌ LLM exception: {str(e)}"
+
 
 # 📋 Extract and summarize clauses
 def extract_clauses_with_summary(text):
