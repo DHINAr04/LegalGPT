@@ -1,9 +1,11 @@
 streamlit
 pymupdf
-langchain==0.0.334
 faiss-cpu
 sentence-transformers
 transformers
-requests
 googletrans==4.0.0-rc1
+requests
+speechrecognition
+pyttsx3
 pydantic==1.10.13
+langchain==0.0.334
