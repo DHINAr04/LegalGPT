@@ -1,162 +1,147 @@
 import streamlit as st
 import fitz  # PyMuPDF
+import os
+import requests
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
-import requests
-import os
 from googletrans import Translator
+import speech_recognition as sr
+import tempfile
+import pyttsx3
 
-# 🔐 Secure: load Hugging Face API key from environment
-HF_API_KEY = os.getenv("HF_API_KEY")
+# 🌐 Load API key
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# 📄 Extract text from PDF
+# 🔊 Initialize Text-to-Speech engine
+tts = pyttsx3.init()
+tts.setProperty('rate', 160)
+
+# 📄 Extract PDF text
 def extract_text_from_pdf(uploaded_file):
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+    return "".join([page.get_text() for page in doc])
 
-# ✂️ Split text into chunks
+# ✂️ Chunk text
 def split_text(text):
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     return splitter.split_text(text)
 
-# 🔢 Generate embeddings
+# 🧠 Embedding & Index
 def get_embeddings(chunks, model):
-    embeddings = model.encode(chunks)
-    return np.array(embeddings)
+    return np.array(model.encode(chunks))
 
-# 📦 Create FAISS index
 def create_faiss_index(embeddings):
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(embeddings)
     return index
 
-# 🔍 Search similar chunks
 def search_index(query, index, chunks, model):
     query_embedding = model.encode([query])
     D, I = index.search(query_embedding, k=3)
-    results = [chunks[i] for i in I[0]]
-    return "\n".join(results)
+    return "\n".join([chunks[i] for i in I[0]])
 
-# 💬 Ask LLM using Hugging Face
+# 💬 Call OpenRouter LLM
 def ask_llm(context, question):
     prompt = f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
-
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://your-app.streamlit.app",
+        "X-Title": "LegalGPT"
+    }
+    data = {
+        "model": "mistralai/mistral-7b-instruct",  # or gpt-3.5-turbo
+        "messages": [
+            {"role": "system", "content": "You are a legal assistant."},
+            {"role": "user", "content": prompt}
+        ]
+    }
     try:
-        response = requests.post(url, headers=headers, json={"inputs": prompt})
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                 headers=headers, json=data)
         if response.status_code != 200:
             return f"❌ LLM API error ({response.status_code}): {response.text}"
-        data = response.json()
-        generated = data[0].get("generated_text", "")
-        return generated.strip()
+        return response.json()['choices'][0]['message']['content'].strip()
     except Exception as e:
         return f"❌ LLM exception: {str(e)}"
 
-
-# 📋 Extract and summarize clauses
-def extract_clauses_with_summary(text):
-    prompt = f"""
-You are a legal assistant. Extract and summarize key clauses from the contract below.
-
-For each clause, show:
-1. Clause Title
-2. Original Text
-3. Simple Summary
-
-Text:
-{text[:3000]}
-    """
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    response = requests.post(
-        "https://api-inference.huggingface.co/models/tiiuae/falcon-rw-1b",
-        headers=headers,
-        json={"inputs": prompt}
-    )
-    try:
-        return response.json()[0]['generated_text']
-    except Exception as e:
-        return f"❌ Clause summary failed: {str(e)}"
-
-# 🌐 Translate text
-def translate_text(text, dest_lang="hi"):
+# 🌍 Translate
+def translate_text(text, dest_lang_code):
     try:
         translator = Translator()
-        result = translator.translate(text, dest=dest_lang)
-        return result.text
+        return translator.translate(text, dest=dest_lang_code).text
     except:
         return "❌ Translation failed."
 
-# 🆚 Compare two documents
-def compare_documents(text1, text2):
-    prompt = f"""
-Compare the following two legal documents.
-
-Document A:
-{text1[:3000]}
-
-Document B:
-{text2[:3000]}
-
-Output:
-- Similar clauses
-- Key differences
-- Summary of both
-    """
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    response = requests.post(
-        "https://api-inference.huggingface.co/models/tiiuae/falcon-rw-1b",
-        headers=headers,
-        json={"inputs": prompt}
-    )
+# 🎤 Voice recognition
+def transcribe_audio(audio_file):
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(audio_file) as source:
+        audio = recognizer.record(source)
     try:
-        return response.json()[0]['generated_text']
-    except Exception as e:
-        return f"❌ Comparison failed: {str(e)}"
+        return recognizer.recognize_google(audio)
+    except sr.UnknownValueError:
+        return "❌ Could not understand audio."
+    except sr.RequestError:
+        return "❌ Voice service error."
 
-# 🚀 Streamlit App UI
-st.set_page_config(page_title="LegalGPT", layout="wide")
-st.title("📄 LegalGPT – AI Legal Document Assistant")
+# 🔊 Speak answer aloud
+def speak_text(text):
+    tts.say(text)
+    tts.runAndWait()
+
+# 🚀 Streamlit App
+st.set_page_config(page_title="LegalGPT with Voice", layout="wide")
+st.title("⚖️ LegalGPT – Voice-Powered AI Legal Assistant")
 
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 tab1, tab2 = st.tabs(["📑 Single Document", "🆚 Compare Documents"])
 
-# Tab 1 – Single PDF
+# === Tab 1: Upload & Ask ===
 with tab1:
     uploaded_file = st.file_uploader("Upload a legal PDF", type="pdf")
     if uploaded_file:
-        st.success("✅ PDF uploaded successfully!")
         text = extract_text_from_pdf(uploaded_file)
         chunks = split_text(text)
         embeddings = get_embeddings(chunks, model)
         index = create_faiss_index(embeddings)
 
-        question = st.text_input("🔍 Ask something about this document:")
+        st.markdown("### 🎤 Ask via microphone or type a question:")
+
+        audio_data = st.file_uploader("Upload voice (WAV only)", type=["wav"])
+        question = st.text_input("Or type your legal question here:")
+
+        if audio_data:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_data.read())
+                voice_question = transcribe_audio(tmp.name)
+                st.write("🗣️ Transcribed:", voice_question)
+                question = voice_question
+
         if question:
             context = search_index(question, index, chunks, model)
             answer = ask_llm(context, question)
-            st.subheader("💬 Answer")
+            st.subheader("💬 AI Answer")
             st.write(answer)
 
-            lang = st.selectbox("🌐 Translate answer to:", ["None", "Hindi", "Tamil"])
-            if lang != "None":
-                code = "hi" if lang == "Hindi" else "ta"
-                translated = translate_text(answer, dest_lang=code)
-                st.subheader(f"🈯 Translation ({lang})")
+            if st.button("🔊 Speak the answer"):
+                speak_text(answer)
+
+            lang_options = {
+                "Hindi": "hi", "Tamil": "ta", "Telugu": "te",
+                "Marathi": "mr", "Bengali": "bn", "French": "fr",
+                "German": "de", "Spanish": "es"
+            }
+
+            target_lang = st.selectbox("🌍 Translate answer to:", ["None"] + list(lang_options.keys()))
+            if target_lang != "None":
+                translated = translate_text(answer, lang_options[target_lang])
+                st.subheader(f"🈯 Translated ({target_lang})")
                 st.write(translated)
 
-        if st.button("🧾 Extract & Summarize Clauses"):
-            clause_summary = extract_clauses_with_summary(text)
-            st.subheader("📌 Key Clauses & Summaries")
-            st.write(clause_summary)
-
-# Tab 2 – Compare two PDFs
+# === Tab 2: Compare PDFs ===
 with tab2:
     pdf1 = st.file_uploader("Upload First PDF", type="pdf", key="pdf1")
     pdf2 = st.file_uploader("Upload Second PDF", type="pdf", key="pdf2")
@@ -164,6 +149,7 @@ with tab2:
     if pdf1 and pdf2:
         text1 = extract_text_from_pdf(pdf1)
         text2 = extract_text_from_pdf(pdf2)
-        comparison = compare_documents(text1, text2)
-        st.subheader("📊 Comparison Results")
+        combined = f"Compare these two contracts:\n\nA:\n{text1[:3000]}\n\nB:\n{text2[:3000]}"
+        comparison = ask_llm("", combined)
+        st.subheader("📊 AI Comparison")
         st.write(comparison)
