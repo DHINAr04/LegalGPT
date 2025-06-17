@@ -9,14 +9,11 @@ import numpy as np
 from googletrans import Translator
 import speech_recognition as sr
 import tempfile
-import pyttsx3
+from gtts import gTTS
+from io import BytesIO
 
 # 🌐 Load API key
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
-# 🔊 Initialize Text-to-Speech engine
-tts = pyttsx3.init()
-tts.setProperty('rate', 160)
 
 # 📄 Extract PDF text
 def extract_text_from_pdf(uploaded_file):
@@ -47,11 +44,11 @@ def ask_llm(context, question):
     prompt = f"Context:\n{context}\n\nQuestion:\n{question}\n\nAnswer:"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://your-app.streamlit.app",
+        "HTTP-Referer": "https://your-app-name.streamlit.app",
         "X-Title": "LegalGPT"
     }
     data = {
-        "model": "mistralai/mistral-7b-instruct",  # or gpt-3.5-turbo
+        "model": "mistralai/mistral-7b-instruct",
         "messages": [
             {"role": "system", "content": "You are a legal assistant."},
             {"role": "user", "content": prompt}
@@ -86,10 +83,15 @@ def transcribe_audio(audio_file):
     except sr.RequestError:
         return "❌ Voice service error."
 
-# 🔊 Speak answer aloud
+# 🔊 Speak answer aloud using gTTS
 def speak_text(text):
-    tts.say(text)
-    tts.runAndWait()
+    try:
+        tts = gTTS(text)
+        mp3_fp = BytesIO()
+        tts.write_to_fp(mp3_fp)
+        st.audio(mp3_fp.getvalue(), format="audio/mp3")
+    except Exception as e:
+        st.warning(f"❌ Voice playback failed: {str(e)}")
 
 # 🚀 Streamlit App
 st.set_page_config(page_title="LegalGPT with Voice", layout="wide")

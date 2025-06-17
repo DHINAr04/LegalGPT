@@ -6,6 +6,6 @@ transformers
 googletrans==4.0.0-rc1
 requests
 speechrecognition
-pyttsx3
+gtts
 pydantic==1.10.13
 langchain==0.0.334
